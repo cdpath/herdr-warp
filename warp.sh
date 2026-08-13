@@ -583,6 +583,12 @@ do_exit() {
     echo "hint: reopen this conversation with WARP_ARGS=\"--resume $_token\" herdr plugin action invoke open --plugin $PLUGIN_ID"
   fi
   rm -f "$PANE_FILE" 2>/dev/null || true
+  # Release native-agent authority and stop the watcher. launch.sh does this
+  # for plugin-opened panes; this covers plugin-driven exit on any warp pane
+  # (e.g. manually started, or opened by an older launch.sh).
+  _pidfile="$(_watcher_pidfile "$_pane")"
+  if [ -f "$_pidfile" ]; then kill "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null || true; fi
+  "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp >/dev/null 2>&1 || true
   echo "status=exited"
 }
 
