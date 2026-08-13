@@ -60,6 +60,15 @@ fi
 
 echo "$(date) exec $WARP ${WARP_ARGS:-}" >> "$LOG" 2>/dev/null || true
 
+# Start the lifecycle watcher: it reports this pane's warp state into herdr's
+# native agent model (pane.report_agent), so the pane shows up in
+# `herdr agent list` with idle/working/blocked while warp runs.
+WATCHER_PID=""
+if [ -n "${HERDR_PANE_ID:-}" ] && [ "${HERDR_ENV:-}" = "1" ]; then
+  nohup sh "$HERDR_PLUGIN_ROOT/warp.sh" watch "$HERDR_PANE_ID" >/dev/null 2>&1 &
+  WATCHER_PID=$!
+fi
+
 # Run warp in the foreground; when it exits, drop into a shell instead of
 # letting the pane die - the resume token warp prints on exit stays visible
 # (and scrapable by `warp.sh exit`), and the pane stays reusable.
@@ -67,5 +76,15 @@ echo "$(date) exec $WARP ${WARP_ARGS:-}" >> "$LOG" 2>/dev/null || true
 # single words).
 # shellcheck disable=SC2086
 "$WARP" ${WARP_ARGS:-}
-echo "herdr.warp: warp exited (code $?). This pane is now a plain shell." >&2
+_warp_rc=$?
+
+# warp exited: stop the watcher and release herdr's agent authority now so the
+# pane leaves `herdr agent list` immediately instead of lingering as unknown.
+[ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null || true
+if [ -n "${HERDR_PANE_ID:-}" ] && [ "${HERDR_ENV:-}" = "1" ]; then
+  "${HERDR_BIN_PATH:-herdr}" pane release-agent "$HERDR_PANE_ID" \
+    --source custom:herdr-warp --agent warp >/dev/null 2>&1 || true
+fi
+
+echo "herdr.warp: warp exited (code $_warp_rc). This pane is now a plain shell." >&2
 exec "${SHELL:-/bin/sh}"

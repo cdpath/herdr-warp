@@ -2,7 +2,9 @@
 
 A [Herdr](https://herdr.dev) plugin that drives the interactive [Warp Agent CLI](https://docs.warp.dev/agents/cli/) (`warp`) in a Herdr pane: open a persistent warp session in a sibling pane, send it prompts, track whether it is idle / working / waiting-for-approval, answer approval cards, and read the transcript.
 
-Companion to [herdr-oz](../herdr-oz): Oz is one-shot (`oz agent run --prompt`), warp is a **persistent, interactive** TUI with no headless mode and no lifecycle hooks ([warpdotdev/Warp#7834](https://github.com/warpdotdev/Warp/issues/7834)), so Herdr does not detect it as a native agent. This plugin drives it through the only surface available - the terminal itself - and turns the screen state into a small, reliable command vocabulary.
+Warp panes managed (or discovered) by this plugin are also **registered as native Herdr agents**: a background watcher reports the scraped lifecycle state through `herdr pane report-agent`, so warp shows up in `herdr agent list`, tab/sidebar rollups, and notifications, and works with event-driven `herdr agent wait`.
+
+Companion to [herdr-oz](../herdr-oz): Oz is one-shot (`oz agent run --prompt`), warp is a **persistent, interactive** TUI with no headless mode and no lifecycle hooks ([warpdotdev/Warp#7834](https://github.com/warpdotdev/Warp/issues/7834)), so Herdr has no built-in detection for it. This plugin drives it through the only surface available - the terminal itself - and turns the screen state into a small, reliable command vocabulary plus a native state authority.
 
 ## Install
 
@@ -56,6 +58,8 @@ Note: `plugin action invoke` is fire-and-forget (output lands in `herdr plugin l
 | `new` | Start a fresh conversation (`/clear`, with ANSI menu-highlight verification; aborts safely if the menu doesn't cooperate). |
 | `stop` | Cancel the in-flight response (single Ctrl+C; never sends two - that would exit warp). |
 | `exit` | Exit warp (double Ctrl+C), capture the printed resume token into the plugin state dir. The pane stays as a plain shell. |
+| `adopt` | (Re)start the native-agent watcher for the warp pane. Rarely needed - every command auto-adopts the pane it discovers. |
+| `watch <pane>` | Internal: the watcher loop. Do not call directly. |
 
 Typical agent-orchestration loop:
 
@@ -100,6 +104,35 @@ before doing this on a machine with anything sensitive.
 
 Native `herdr agent start/prompt/wait` does not cover warp (not a recognized
 agent kind, no hook surface), which is exactly what this plugin replaces.
+
+## Native agent registration
+
+Herdr's built-in agent detection cannot see warp (unsupported process kind,
+no hooks), so this plugin **is** warp's integration: a per-pane watcher
+(`warp.sh watch`) polls the screen classifier and reports transitions via
+
+```
+herdr pane report-agent <pane> --source custom:herdr-warp --agent warp --state <idle|working|blocked|unknown>
+```
+
+What you get:
+
+- `herdr agent list` shows `warp` with live `idle`/`working`/`blocked` state
+- sidebar/tab/workspace rollups and notifications (blocked surfaces the
+  approval question as its message)
+- event-driven waits: `herdr agent wait <pane> --until idle --timeout 120000`
+  instead of polling
+
+What you do not get: `herdr agent prompt` / `agent read` / `agent explain`
+require herdr-recognized agent kinds, so prompting still goes through this
+plugin (`send`/`ask`) or plain `herdr pane run`.
+
+Watcher lifecycle: panes opened through the plugin get a watcher from
+`launch.sh` automatically; manually started warp panes are adopted the first
+time any plugin command discovers them (`adopt` forces it). The watcher exits
+and releases authority when the pane dies, when warp exits (launch.sh also
+releases immediately), or after the warp chrome has been absent for a while
+(e.g. shell after exit, or a full-screen command like `vim`).
 
 ## How it works (and its limits)
 
@@ -146,6 +179,7 @@ Known limits:
 | `WARP_READ_SOURCE` | `recent-unwrapped` | Read source for `read` |
 | `WARP_READ_RAW` | _unset_ | Keep TUI chrome in `read`/`wait` output |
 | `WARP_DEBUG` | _unset_ | Dump classifier input to stderr |
+| `WARP_WATCH_INTERVAL` | `1` | Watcher poll interval in seconds |
 
 For unattended operation consider `WARP_ARGS="--auto-approve"` at `open` time - but read the [auto-approve danger notes](https://docs.warp.dev/agents/cli/permissions-and-profiles/#auto-approve) first: the agent then runs commands and applies edits without review.
 

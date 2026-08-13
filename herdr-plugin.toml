@@ -1,6 +1,6 @@
 id = "herdr.warp"
 name = "Warp"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.7.0"
 description = "Drive the interactive Warp Agent CLI (`warp`) in a Herdr pane. Open a persistent warp session in a sibling pane, send prompts (selected text), track idle/working/blocked state, answer approval cards, and read the transcript."
 platforms = ["linux", "macos"]
@@ -85,6 +85,12 @@ id = "stop"
 title = "Stop Warp response (Ctrl+C)"
 contexts = ["workspace"]
 command = ["sh", "warp.sh", "stop"]
+
+[[actions]]
+id = "adopt"
+title = "Register warp pane as a native herdr agent"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "adopt"]
 
 [[actions]]
 id = "exit"

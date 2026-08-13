@@ -17,7 +17,7 @@
 #              input, start/login screen, full-screen command, ...)
 #   absent   - no warp markers on screen (not a warp pane)
 #
-# Subcommands: open | send | ask | answer | status | wait | read | approve | deny | new | stop | exit
+# Subcommands: open | send | ask | answer | status | wait | read | approve | deny | new | stop | exit | watch | adopt
 #
 # Invocation:
 #   - as plugin actions:  herdr plugin action invoke send --plugin herdr.warp
@@ -46,6 +46,8 @@ set -eu
 
 HERDR="${HERDR_BIN_PATH:-herdr}"
 PLUGIN_ID="herdr.warp"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPORT_SOURCE="custom:herdr-warp"   # herdr lifecycle-authority source id
 STATE_DIR="${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/herdr/plugins/$PLUGIN_ID}"
 PANE_FILE="$STATE_DIR/pane"
 RESUME_FILE="$STATE_DIR/resume-token"
@@ -115,19 +117,21 @@ except Exception:
 }
 
 # Resolve the warp pane: WARP_PANE override -> state file -> scan all panes.
-# Prints the pane id on success, nothing otherwise.
+# Prints the pane id on success, nothing otherwise. A found pane gets a
+# lifecycle watcher (native agent registration) if it lacks one.
 find_pane() {
   if [ -n "${WARP_PANE:-}" ]; then
-    if is_warp_text "$(pane_visible "$WARP_PANE")"; then printf '%s\n' "$WARP_PANE"; return 0; fi
+    if is_warp_text "$(pane_visible "$WARP_PANE")"; then ensure_watcher "$WARP_PANE"; printf '%s\n' "$WARP_PANE"; return 0; fi
     return 1
   fi
   if [ -f "$PANE_FILE" ]; then
     _p="$(head -1 "$PANE_FILE" 2>/dev/null || true)"
-    if [ -n "$_p" ] && is_warp_text "$(pane_visible "$_p")"; then printf '%s\n' "$_p"; return 0; fi
+    if [ -n "$_p" ] && is_warp_text "$(pane_visible "$_p")"; then ensure_watcher "$_p"; printf '%s\n' "$_p"; return 0; fi
   fi
   for _p in $(all_pane_ids); do
     if is_warp_text "$(pane_visible "$_p")"; then
       printf '%s\n' "$_p" > "$PANE_FILE" 2>/dev/null || true
+      ensure_watcher "$_p"
       printf '%s\n' "$_p"
       return 0
     fi
@@ -137,7 +141,93 @@ find_pane() {
 
 require_pane() {
   _p="$(find_pane)" || die "no warp pane found. Open one: herdr plugin action invoke open --plugin $PLUGIN_ID"
+  ensure_watcher "$_p"
   printf '%s\n' "$_p"
+}
+
+# ------------------------------------------------------------ watcher ----
+# The watcher reports warp's scraped state into herdr's native agent model
+# (pane.report_agent), so a warp pane shows up in `herdr agent list` and
+# works with `agent wait` / rollups / notifications. herdr has no built-in
+# process detection for warp, so this plugin is the authority.
+
+_time_ns() { python3 -c 'import time; print(time.time_ns())'; }
+
+_watcher_pidfile() { printf '%s/watch-%s.pid' "$STATE_DIR" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"; }
+
+# Start a watcher for a pane if none is running. Safe to call often.
+ensure_watcher() {
+  _pane="$1"
+  _pidfile="$(_watcher_pidfile "$_pane")"
+  if [ -f "$_pidfile" ] && kill -0 "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  nohup sh "$SCRIPT_DIR/warp.sh" watch "$_pane" >/dev/null 2>&1 &
+  echo $! > "$_pidfile" 2>/dev/null || true
+}
+
+# Extract the approval question for blocked --message (display-only).
+card_question() {
+  pane_visible "$1" | sed -E -n 's/^ *■ *(Is it OK[^?]*\??).*/\1/p' | head -1
+}
+
+do_watch() {
+  _pane="$1"
+  _last=""
+  _absent=0
+  _seen=""
+  _released=""
+  _release() {
+    [ -n "$_released" ] && return 0
+    _released=1
+    "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp >/dev/null 2>&1 || true
+    rm -f "$(_watcher_pidfile "$_pane")" 2>/dev/null || true
+  }
+  trap '_release' EXIT
+  trap '_release; exit 0' INT TERM
+  while :; do
+    if ! _vis="$("$HERDR" pane read "$_pane" --source visible --format text 2>/dev/null)"; then
+      break   # pane is gone
+    fi
+    _s="$(classify_text "$(printf '%s' "$_vis" | tr -d '\r')")"
+    case "$_s" in
+      absent)
+        _absent=$((_absent + 1))
+        # pre-TUI (login/update) gets a long grace; post-warp absence (shell
+        # after exit, full-screen app) a shorter one, then we stop watching.
+        if [ -n "$_seen" ]; then [ "$_absent" -ge 60 ] && break; else [ "$_absent" -ge 180 ] && break; fi
+        ;;
+      *)
+        _seen=1
+        _absent=0
+        if [ "$_s" != "$_last" ]; then
+          if [ "$_s" = "blocked" ]; then
+            _q="$(card_question "$_pane")"
+            if [ -n "$_q" ]; then
+              "$HERDR" pane report-agent "$_pane" --source "$REPORT_SOURCE" --agent warp \
+                --state "$_s" --seq "$(_time_ns)" --message "$_q" >/dev/null 2>&1 || true
+            else
+              "$HERDR" pane report-agent "$_pane" --source "$REPORT_SOURCE" --agent warp \
+                --state "$_s" --seq "$(_time_ns)" >/dev/null 2>&1 || true
+            fi
+          else
+            "$HERDR" pane report-agent "$_pane" --source "$REPORT_SOURCE" --agent warp \
+              --state "$_s" --seq "$(_time_ns)" >/dev/null 2>&1 || true
+          fi
+          _last="$_s"
+        fi
+        ;;
+    esac
+    sleep "${WARP_WATCH_INTERVAL:-1}"
+  done
+}
+
+do_adopt() {
+  _pane="$(require_pane)"
+  ensure_watcher "$_pane"
+  echo "warp_pane=$_pane"
+  echo "watcher=$(cat "$(_watcher_pidfile "$_pane")" 2>/dev/null || echo unknown)"
+  echo "status=$(classify_pane "$_pane")"
 }
 
 # Parse selected_text / focused_pane_cwd out of HERDR_PLUGIN_CONTEXT_JSON.
@@ -215,7 +305,6 @@ do_open() {
     [ -n "${WARP_OPEN_FOCUS:-}" ] && "$HERDR" pane focus "$_p" >/dev/null 2>&1 || true
     return 0
   fi
-
   _cwd="$(ctx_field focused_pane_cwd)"
   _cwd="${_cwd:-$PWD}"
   _dir="${WARP_SPLIT_DIRECTION:-right}"
@@ -267,6 +356,7 @@ except Exception:
   done
   echo "warp_pane=$_pane"
   echo "status=$_st"
+  [ "$_st" != "absent" ] && ensure_watcher "$_pane"
   if [ "$_st" = "absent" ] || [ "$_st" = "unknown" ]; then
     if ! "$HERDR" pane read "$_pane" --source visible >/dev/null 2>&1; then
       echo "hint: the pane died right after open; check the launch log:" >&2
@@ -511,5 +601,7 @@ case "$cmd" in
   new) do_new ;;
   stop) do_stop ;;
   exit) do_exit ;;
-  *) die "unknown subcommand '$cmd' (open|send|ask|answer|status|wait|read|approve|deny|new|stop|exit)" ;;
+  watch) do_watch "$@" ;;
+  adopt) do_adopt ;;
+  *) die "unknown subcommand '$cmd' (open|send|ask|answer|status|wait|read|approve|deny|new|stop|exit|watch|adopt)" ;;
 esac
