@@ -1,0 +1,81 @@
+id = "herdr.warp"
+name = "Warp"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Drive the interactive Warp Agent CLI (`warp`) in a Herdr pane. Open a persistent warp session in a sibling pane, send prompts (selected text), track idle/working/blocked state, answer approval cards, and read the transcript."
+platforms = ["linux", "macos"]
+
+# Pane entrypoint: a persistent Warp Agent CLI session.
+#   herdr plugin pane open --plugin herdr.warp --entrypoint agent \
+#     --placement split --direction right --cwd "$PWD" --no-focus
+# Extra warp flags via: --env WARP_ARGS="--auto-approve"
+[[panes]]
+id = "agent"
+title = "Warp Agent"
+placement = "split"
+# NOTE: keep this a simple relative argv. Herdr joins pane-command argv into
+# a shell string, so multi-word sh -c tricks break, and pane commands start
+# in the plugin root unless --cwd is given (which would break the relative
+# path). The open action therefore passes the desired session cwd as
+# --env WARP_CWD=... and launch.sh cds there before exec'ing warp.
+command = ["sh", "launch.sh"]
+
+[[actions]]
+id = "open"
+title = "Open Warp pane"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "open"]
+
+[[actions]]
+id = "send"
+title = "Send prompt to Warp (selected text)"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "send"]
+
+[[actions]]
+id = "status"
+title = "Warp status"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "status"]
+
+[[actions]]
+id = "wait"
+title = "Wait for Warp to finish"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "wait"]
+
+[[actions]]
+id = "read"
+title = "Read Warp transcript"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "read"]
+
+[[actions]]
+id = "approve"
+title = "Approve Warp action"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "approve"]
+
+[[actions]]
+id = "deny"
+title = "Deny Warp action"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "deny"]
+
+[[actions]]
+id = "new"
+title = "New Warp conversation"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "new"]
+
+[[actions]]
+id = "stop"
+title = "Stop Warp response (Ctrl+C)"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "stop"]
+
+[[actions]]
+id = "exit"
+title = "Exit Warp session"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "exit"]
