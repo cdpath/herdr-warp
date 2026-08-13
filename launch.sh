@@ -63,10 +63,18 @@ echo "$(date) exec $WARP ${WARP_ARGS:-}" >> "$LOG" 2>/dev/null || true
 # Start the lifecycle watcher: it reports this pane's warp state into herdr's
 # native agent model (pane.report_agent), so the pane shows up in
 # `herdr agent list` with idle/working/blocked while warp runs.
+# Writes the same pidfile warp.sh's ensure_watcher uses, so exactly one
+# watcher runs per pane no matter who starts it.
 WATCHER_PID=""
 if [ -n "${HERDR_PANE_ID:-}" ] && [ "${HERDR_ENV:-}" = "1" ]; then
-  nohup sh "$HERDR_PLUGIN_ROOT/warp.sh" watch "$HERDR_PANE_ID" >/dev/null 2>&1 &
-  WATCHER_PID=$!
+  _pidfile="$STATE_DIR/watch-$(printf '%s' "$HERDR_PANE_ID" | tr -c 'A-Za-z0-9' '_').pid"
+  if [ -f "$_pidfile" ] && kill -0 "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null; then
+    WATCHER_PID="$(cat "$_pidfile")"
+  else
+    nohup sh "$HERDR_PLUGIN_ROOT/warp.sh" watch "$HERDR_PANE_ID" >/dev/null 2>&1 &
+    WATCHER_PID=$!
+    echo "$WATCHER_PID" > "$_pidfile" 2>/dev/null || true
+  fi
 fi
 
 # Run warp in the foreground; when it exits, drop into a shell instead of
