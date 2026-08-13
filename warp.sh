@@ -249,10 +249,17 @@ do_watch() {
     _s="$(classify_text "$(printf '%s' "$_vis" | tr -d '\r')")"
     case "$_s" in
       absent)
-        _absent=$((_absent + 1))
-        # pre-TUI (login/update) gets a long grace; post-warp absence (shell
-        # after exit, full-screen app) a shorter one, then we stop watching.
-        if [ -n "$_seen" ]; then [ "$_absent" -ge 60 ] && break; else [ "$_absent" -ge 180 ] && break; fi
+        if pane_is_warp_process "$_pane"; then
+          # warp is still the foreground process but its chrome is hidden:
+          # pre-TUI login/update screen or a full-screen command inside warp.
+          # Wait within a grace budget before giving up.
+          _absent=$((_absent + 1))
+          if [ -n "$_seen" ]; then [ "$_absent" -ge 60 ] && break; else [ "$_absent" -ge 180 ] && break; fi
+        else
+          # foreground process is no longer warp: warp really exited
+          # (back to a shell) - release immediately.
+          break
+        fi
         ;;
       *)
         _seen=1
