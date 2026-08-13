@@ -130,9 +130,14 @@ plugin (`send`/`ask`) or plain `herdr pane run`.
 Watcher lifecycle: panes opened through the plugin get a watcher from
 `launch.sh` automatically; manually started warp panes are adopted the first
 time any plugin command discovers them (`adopt` forces it). The watcher exits
-and releases authority when the pane dies, when warp exits (launch.sh also
-releases immediately), or after the warp chrome has been absent for a while
-(e.g. shell after exit, or a full-screen command like `vim`).
+and releases authority when the pane dies, when warp exits (launch.sh and the
+`exit` subcommand both release immediately), or after the warp chrome has
+been absent for a while (e.g. shell after exit, or a full-screen command like
+`vim`).
+
+Caveat: herdr keeps the pane's agent record at its last-reported state after
+release - there is no "exited" state for custom agents - so an exited warp
+pane still lists as `warp idle` until the pane is closed.
 
 ## How it works (and its limits)
 

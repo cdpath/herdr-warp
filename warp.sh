@@ -590,6 +590,7 @@ do_exit() {
   if [ -f "$_pidfile" ]; then kill "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null || true; fi
   "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp >/dev/null 2>&1 || true
   echo "status=exited"
+  echo "hint: the pane is now a plain shell; its agent record lingers as last-known state until the pane is closed (herdr custom-agent behavior)." >&2
 }
 
 # ------------------------------------------------------------------ main --
