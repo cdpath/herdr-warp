@@ -17,7 +17,7 @@
 #              input, start/login screen, full-screen command, ...)
 #   absent   - no warp markers on screen (not a warp pane)
 #
-# Subcommands: open | send | ask | status | wait | read | approve | deny | new | stop | exit
+# Subcommands: open | send | ask | answer | status | wait | read | approve | deny | new | stop | exit
 #
 # Invocation:
 #   - as plugin actions:  herdr plugin action invoke send --plugin herdr.warp
@@ -421,6 +421,12 @@ do_ask() {
   read_transcript "$_pane" "${WARP_ANSWER_WINDOW:-200}" recent-unwrapped | extract_last_answer
 }
 
+do_answer() {
+  _pane="$(require_pane)"
+  [ "$(classify_pane "$_pane")" = "idle" ] || die "warp is not idle; wait first."
+  read_transcript "$_pane" "${WARP_ANSWER_WINDOW:-200}" recent-unwrapped | extract_last_answer
+}
+
 do_approve() {
   _pane="$(require_pane)"
   [ "$(classify_pane "$_pane")" = "blocked" ] || die "warp is not showing an approval card."
@@ -499,10 +505,11 @@ case "$cmd" in
   wait) do_wait ;;
   read) do_read "$@" ;;
   ask) do_ask "$@" ;;
+  answer) do_answer ;;
   approve) do_approve ;;
   deny) do_deny ;;
   new) do_new ;;
   stop) do_stop ;;
   exit) do_exit ;;
-  *) die "unknown subcommand '$cmd' (open|send|ask|status|wait|read|approve|deny|new|stop|exit)" ;;
+  *) die "unknown subcommand '$cmd' (open|send|ask|answer|status|wait|read|approve|deny|new|stop|exit)" ;;
 esac

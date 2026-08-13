@@ -39,6 +39,12 @@ contexts = ["workspace"]
 command = ["sh", "warp.sh", "ask"]
 
 [[actions]]
+id = "answer"
+title = "Print Warp's last answer again"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "answer"]
+
+[[actions]]
 id = "status"
 title = "Warp status"
 contexts = ["workspace"]

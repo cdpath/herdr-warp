@@ -47,6 +47,7 @@ Note: `plugin action invoke` is fire-and-forget (output lands in `herdr plugin l
 | `open` | Find the existing warp pane, or open one via the plugin pane entrypoint (split, keeps caller focus, focused pane's cwd). Idempotent. |
 | `send [text]` | Submit a prompt (multi-line OK). Text from argv, else the focused pane's selected text. Auto-opens a pane if none. Refuses while busy/blocked (see `WARP_SEND_WAIT`). |
 | `ask [text]` | One-shot Q&A for agent-to-agent use: send, wait for idle, print ONLY the final answer text (tool calls/thoughts filtered). Exit 2 + card on stderr when an approval is pending. Multi-turn `read` for full detail. |
+| `answer` | Re-print the last turn's answer text (same extraction as `ask`, without sending anything). For approval-handling loops: after `ask` exits 2 and you `approve` + `wait` to idle, call `answer` to collect the result. |
 | `status` | Print `warp_pane=` + `status=` (`idle`/`working`/`blocked`/`unknown`/`absent`); prints the approval card when blocked. |
 | `wait` | Poll until idle (exit 0, prints transcript tail), blocked (exit 2, prints the card), or timeout (exit 1). |
 | `read [lines]` | Print the transcript tail (default 120 lines) with input-box/statusline chrome stripped. |
@@ -79,6 +80,18 @@ Exit codes: `0` answer printed on stdout; `2` warp is waiting on an approval
 card (inspect stderr, then `sh warp.sh approve` / `deny` and re-`wait`); `1`
 timeout or no pane. `ask` reuses the current conversation; set `WARP_ASK_NEW=1`
 to `/clear` first when contexts should not bleed between subtasks.
+
+Full approval-handling loop:
+
+```bash
+sh "$WARP" ask "create fib.sh and run it"; rc=$?
+while [ "$rc" -eq 2 ]; do          # blocked: inspect stderr card, then decide
+  sh "$WARP" approve >/dev/null   # or: sh "$WARP" deny >/dev/null
+  sh "$WARP" wait >/dev/null; rc=$?   # 2 = blocked on the next action
+  [ "$rc" -eq 1 ] && break        # timeout
+done
+[ "$rc" -eq 0 ] && sh "$WARP" answer
+```
 
 If subtasks routinely need command/file approvals, open the pane with
 `WARP_ARGS="--auto-approve"` once and approvals stop interrupting the loop -
