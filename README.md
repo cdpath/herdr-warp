@@ -46,6 +46,7 @@ Note: `plugin action invoke` is fire-and-forget (output lands in `herdr plugin l
 |---|---|
 | `open` | Find the existing warp pane, or open one via the plugin pane entrypoint (split, keeps caller focus, focused pane's cwd). Idempotent. |
 | `send [text]` | Submit a prompt (multi-line OK). Text from argv, else the focused pane's selected text. Auto-opens a pane if none. Refuses while busy/blocked (see `WARP_SEND_WAIT`). |
+| `ask [text]` | One-shot Q&A for agent-to-agent use: send, wait for idle, print ONLY the final answer text (tool calls/thoughts filtered). Exit 2 + card on stderr when an approval is pending. Multi-turn `read` for full detail. |
 | `status` | Print `warp_pane=` + `status=` (`idle`/`working`/`blocked`/`unknown`/`absent`); prints the approval card when blocked. |
 | `wait` | Poll until idle (exit 0, prints transcript tail), blocked (exit 2, prints the card), or timeout (exit 1). |
 | `read [lines]` | Print the transcript tail (default 120 lines) with input-box/statusline chrome stripped. |
@@ -62,6 +63,30 @@ sh warp.sh send "summarize the last commit"
 sh warp.sh wait            # rc 2 => approval needed: inspect card, then approve/deny
 sh warp.sh read 40         # or: WARP_WAIT_TAIL=40 sh warp.sh wait
 ```
+
+## Calling warp from another agent (model-quota offloading)
+
+The main use case: an orchestrating agent (pi, claude, ...) running in Herdr
+delegates subtasks to warp so they burn Warp-plan credits instead of the
+orchestrator's own tokens. The primitive for that is `ask`:
+
+```bash
+WARP="$(ls -d ~/.config/herdr/plugins/github/herdr.warp-*/warp.sh 2>/dev/null | head -1)"
+answer="$(sh "$WARP" ask "What is the time complexity of quicksort? One sentence.")"
+```
+
+Exit codes: `0` answer printed on stdout; `2` warp is waiting on an approval
+card (inspect stderr, then `sh warp.sh approve` / `deny` and re-`wait`); `1`
+timeout or no pane. `ask` reuses the current conversation; set `WARP_ASK_NEW=1`
+to `/clear` first when contexts should not bleed between subtasks.
+
+If subtasks routinely need command/file approvals, open the pane with
+`WARP_ARGS="--auto-approve"` once and approvals stop interrupting the loop -
+read the [danger notes](https://docs.warp.dev/agents/cli/permissions-and-profiles/#auto-approve)
+before doing this on a machine with anything sensitive.
+
+Native `herdr agent start/prompt/wait` does not cover warp (not a recognized
+agent kind, no hook surface), which is exactly what this plugin replaces.
 
 ## How it works (and its limits)
 
@@ -100,6 +125,8 @@ Known limits:
 | `WARP_SPLIT_DIRECTION` | `right` | Split direction for `open` |
 | `WARP_OPEN_FOCUS` | _unset_ | Set to focus the warp pane after `open` |
 | `WARP_SEND_WAIT` | _unset_ | Set to wait for idle (up to `WARP_WAIT_TIMEOUT`) instead of failing when busy |
+| `WARP_ASK_NEW` | _unset_ | `ask` starts a fresh conversation (`/clear`) before prompting |
+| `WARP_ANSWER_WINDOW` | `200` | Transcript lines scanned for the `ask` answer extraction |
 | `WARP_WAIT_TIMEOUT` | `120` | Seconds for `wait` |
 | `WARP_WAIT_TAIL` | `30` | Transcript lines printed after a successful `wait`; `0` disables |
 | `WARP_READ_LINES` | `120` | Default lines for `read` |

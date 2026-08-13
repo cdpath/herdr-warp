@@ -17,7 +17,7 @@
 #              input, start/login screen, full-screen command, ...)
 #   absent   - no warp markers on screen (not a warp pane)
 #
-# Subcommands: open | send | status | wait | read | approve | deny | new | stop | exit
+# Subcommands: open | send | ask | status | wait | read | approve | deny | new | stop | exit
 #
 # Invocation:
 #   - as plugin actions:  herdr plugin action invoke send --plugin herdr.warp
@@ -256,12 +256,13 @@ except Exception:
   fi
   [ -n "${_pane:-}" ] || die "warp pane opened but its id could not be determined: $_out"
 
-  # Wait for the TUI to come up (first launch can show login/update screens).
+  # Wait for the TUI to come up: keep polling through startup animation
+  # (unknown) and pre-TUI (absent) until idle, pane death, or timeout.
   _start=$(date +%s); _st=""
   while [ $(( $(date +%s) - _start )) -lt 30 ]; do
     _st="$(classify_pane "$_pane")"
     [ "$_st" = "idle" ] && break
-    [ "$_st" = "absent" ] || break
+    if ! "$HERDR" pane read "$_pane" --source visible >/dev/null 2>&1; then _st="absent"; break; fi
     sleep 0.5
   done
   echo "warp_pane=$_pane"
@@ -289,6 +290,14 @@ do_send() {
   }
 
   _s="$(classify_pane "$_pane")"
+  if [ "$_s" = "unknown" ]; then
+    # Startup animation / transient menu: give it a few seconds to settle.
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+      sleep 0.5
+      _s="$(classify_pane "$_pane")"
+      [ "$_s" != "unknown" ] && break
+    done
+  fi
   if [ "$_s" != "idle" ]; then
     if [ -n "${WARP_SEND_WAIT:-}" ]; then
       wait_idle "$_pane" "${WARP_WAIT_TIMEOUT:-120}" && _s="idle" || _s="$(classify_pane "$_pane")"
@@ -361,6 +370,55 @@ do_wait() {
 do_read() {
   _pane="$(require_pane)"
   read_transcript "$_pane" "${1:-${WARP_READ_LINES:-120}}" "${WARP_READ_SOURCE:-recent-unwrapped}"
+}
+
+# Extract the last turn's assistant text from transcript text: the segment
+# after the last prompt echo ("  > ..."), up to its "∷ Ns • N credits"
+# summary line, with thought/tool/meta lines filtered out. Heuristic tuned
+# for Q&A turns; use `read` for full turn detail.
+extract_last_answer() {
+  awk '
+    /^  *> / { buf=""; in_turn=1; in_cont=1; next }
+    in_turn && in_cont && /^    / { next }   # multi-line prompt continuation
+    in_turn && in_cont { in_cont=0 }
+    /^  *∷ / { if (in_turn) out=buf; in_turn=0; next }
+    in_turn {
+      if ($0 ~ /^  *Thought for/) next
+      if ($0 ~ /^  *Thinking\.\.\./) next
+      if ($0 ~ /^  *✓ /) next
+      if ($0 ~ /^  *■ /) next
+      if ($0 ~ /^  *Output:/) next
+      line=$0; sub(/^  /, "", line)         # strip the 2-space transcript indent
+      buf = buf line "\n"
+    }
+    END {
+      gsub(/^\n+/, "", out)
+      gsub(/\n+$/, "", out)
+      printf "%s", out
+      if (out != "") printf "\n"
+    }
+  '
+}
+
+do_ask() {
+  _prompt="$*"
+  if [ -z "$_prompt" ]; then _prompt="$(ctx_field selected_text | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"; fi
+  [ -n "$_prompt" ] || die "no prompt. Pass text as argv or select text and invoke the ask action."
+  [ -n "${WARP_ASK_NEW:-}" ] && { do_new >/dev/null || die "could not start a fresh conversation"; }
+  _sw="${WARP_SEND_WAIT:-}"; WARP_SEND_WAIT=1
+  do_send "$_prompt" >/dev/null
+  WARP_SEND_WAIT="$_sw"
+  _pane="$(require_pane)"
+  _rc=0
+  wait_idle "$_pane" "${WARP_WAIT_TIMEOUT:-120}" || _rc=$?
+  if [ "$_rc" -eq 2 ]; then
+    echo "status=blocked" >&2
+    print_card "$_pane" >&2
+    exit 2
+  fi
+  [ "$_rc" -eq 0 ] || die "timed out after ${WARP_WAIT_TIMEOUT:-120}s"
+  sleep 0.5   # let the ∷ summary line render
+  read_transcript "$_pane" "${WARP_ANSWER_WINDOW:-200}" recent-unwrapped | extract_last_answer
 }
 
 do_approve() {
@@ -440,10 +498,11 @@ case "$cmd" in
   status) do_status ;;
   wait) do_wait ;;
   read) do_read "$@" ;;
+  ask) do_ask "$@" ;;
   approve) do_approve ;;
   deny) do_deny ;;
   new) do_new ;;
   stop) do_stop ;;
   exit) do_exit ;;
-  *) die "unknown subcommand '$cmd' (open|send|status|wait|read|approve|deny|new|stop|exit)" ;;
+  *) die "unknown subcommand '$cmd' (open|send|ask|status|wait|read|approve|deny|new|stop|exit)" ;;
 esac

@@ -33,6 +33,12 @@ contexts = ["workspace"]
 command = ["sh", "warp.sh", "send"]
 
 [[actions]]
+id = "ask"
+title = "Ask Warp (selected text, waits, prints answer)"
+contexts = ["workspace"]
+command = ["sh", "warp.sh", "ask"]
+
+[[actions]]
 id = "status"
 title = "Warp status"
 contexts = ["workspace"]
