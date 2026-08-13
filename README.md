@@ -108,19 +108,25 @@ agent kind, no hook surface), which is exactly what this plugin replaces.
 ## Native agent registration
 
 Herdr's built-in agent detection cannot see warp (unsupported process kind,
-no hooks), so this plugin **is** warp's integration: a per-pane watcher
-(`warp.sh watch`) polls the screen classifier and reports transitions via
+no hooks), so this plugin **is** warp's integration. Two background parts:
 
-```
-herdr pane report-agent <pane> --source custom:herdr-warp --agent warp --state <idle|working|blocked|unknown>
-```
+- a **scanner** (`warp.sh scan-loop`, started by the plugin startup hook and
+  lazily by any plugin command) polls pane foreground processes and adopts
+  every pane running warp - including `warp` typed into a plain shell pane;
+- a per-pane **watcher** (`warp.sh watch`) polls the screen classifier and
+  reports transitions via
+  `herdr pane report-agent ... --agent warp --state <idle|working|blocked|unknown>`.
+
+So a warp session registers itself within a few seconds of starting, no
+plugin invocation needed.
 
 What you get:
 
-- `herdr agent list` shows `warp` with live `idle`/`working`/`blocked` state
+- `herdr agent list` shows `warp` with live `idle`/`working`/`blocked`/`done`
+  state (herdr derives `done` from idle + attention as usual)
 - sidebar/tab/workspace rollups and notifications (blocked surfaces the
   approval question as its message)
-- event-driven waits: `herdr agent wait <pane> --until idle --timeout 120000`
+- event-driven waits: `herdr agent wait <pane> --until idle --until done`
   instead of polling
 
 What you do not get: `herdr agent prompt` / `agent read` / `agent explain`
@@ -185,6 +191,7 @@ Known limits:
 | `WARP_READ_RAW` | _unset_ | Keep TUI chrome in `read`/`wait` output |
 | `WARP_DEBUG` | _unset_ | Dump classifier input to stderr |
 | `WARP_WATCH_INTERVAL` | `1` | Watcher poll interval in seconds |
+| `WARP_SCAN_INTERVAL` | `3` | Scanner poll interval in seconds |
 
 For unattended operation consider `WARP_ARGS="--auto-approve"` at `open` time - but read the [auto-approve danger notes](https://docs.warp.dev/agents/cli/permissions-and-profiles/#auto-approve) first: the agent then runs commands and applies edits without review.
 
