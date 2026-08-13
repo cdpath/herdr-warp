@@ -237,7 +237,7 @@ do_watch() {
   _release() {
     [ -n "$_released" ] && return 0
     _released=1
-    "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp >/dev/null 2>&1 || true
+    "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp --seq "$(_time_ns)" >/dev/null 2>&1 || true
     rm -f "$(_watcher_pidfile "$_pane")" 2>/dev/null || true
   }
   trap '_release' EXIT
@@ -659,9 +659,9 @@ do_exit() {
   # (e.g. manually started, or opened by an older launch.sh).
   _pidfile="$(_watcher_pidfile "$_pane")"
   if [ -f "$_pidfile" ]; then kill "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null || true; fi
-  "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp >/dev/null 2>&1 || true
+  "$HERDR" pane release-agent "$_pane" --source "$REPORT_SOURCE" --agent warp --seq "$(_time_ns)" >/dev/null 2>&1 || true
   echo "status=exited"
-  echo "hint: the pane is now a plain shell; its agent record lingers as last-known state until the pane is closed (herdr custom-agent behavior)." >&2
+  echo "hint: the pane is now a plain shell; its agent registration has been released." >&2
 }
 
 # ------------------------------------------------------------------ main --

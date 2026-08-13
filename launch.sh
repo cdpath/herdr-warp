@@ -91,7 +91,8 @@ _warp_rc=$?
 [ -n "$WATCHER_PID" ] && kill "$WATCHER_PID" 2>/dev/null || true
 if [ -n "${HERDR_PANE_ID:-}" ] && [ "${HERDR_ENV:-}" = "1" ]; then
   "${HERDR_BIN_PATH:-herdr}" pane release-agent "$HERDR_PANE_ID" \
-    --source custom:herdr-warp --agent warp >/dev/null 2>&1 || true
+    --source custom:herdr-warp --agent warp \
+    --seq "$(python3 -c 'import time; print(time.time_ns())')" >/dev/null 2>&1 || true
 fi
 
 echo "herdr.warp: warp exited (code $_warp_rc). This pane is now a plain shell." >&2
