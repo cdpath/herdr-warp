@@ -1,6 +1,6 @@
 id = "herdr.warp"
 name = "Warp"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.7.0"
 description = "Drive the interactive Warp Agent CLI (`warp`) in a Herdr pane. Open a persistent warp session in a sibling pane, send prompts (selected text), track idle/working/blocked state, answer approval cards, and read the transcript."
 platforms = ["linux", "macos"]
@@ -9,6 +9,11 @@ platforms = ["linux", "macos"]
 #   herdr plugin pane open --plugin herdr.warp --entrypoint agent \
 #     --placement split --direction right --cwd "$PWD" --no-focus
 # Extra warp flags via: --env WARP_ARGS="--auto-approve"
+# Startup hook: make sure the scanner daemon is running so manually started
+# `warp` sessions in any pane are discovered and registered as native agents.
+[[startup]]
+command = ["sh", "warp.sh", "ensure-scanner"]
+
 [[panes]]
 id = "agent"
 title = "Warp Agent"

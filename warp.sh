@@ -145,6 +145,63 @@ require_pane() {
   printf '%s\n' "$_p"
 }
 
+# ------------------------------------------------------------ scanner ----
+# A global background loop that watches for panes whose FOREGROUND process is
+# warp (manual `warp` in any shell pane included) and attaches a lifecycle
+# watcher to each. Started by the plugin startup hook and (lazily) by any
+# plugin command, so manual warp sessions register as native herdr agents
+# without anyone invoking the plugin first.
+
+# Does the pane's foreground process look like the warp CLI?
+pane_is_warp_process() {
+  "$HERDR" pane process-info --pane "$1" 2>/dev/null | python3 -c '
+import json, os, sys
+try:
+    d = json.load(sys.stdin)
+    procs = d.get("result", {}).get("process_info", {}).get("foreground_processes", [])
+    for p in procs:
+        for key in ("argv0", "name"):
+            if os.path.basename(str(p.get(key) or "")) in ("warp", "warp-tui", "warp-tui-stable"):
+                sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+'
+}
+
+do_scan() {
+  for _p in $(all_pane_ids); do
+    _pidfile="$(_watcher_pidfile "$_p")"
+    if [ -f "$_pidfile" ] && kill -0 "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null; then
+      continue
+    fi
+    if pane_is_warp_process "$_p"; then
+      ensure_watcher "$_p"
+      [ -f "$PANE_FILE" ] || printf '%s\n' "$_p" > "$PANE_FILE" 2>/dev/null || true
+    fi
+  done
+}
+
+do_scan_loop() {
+  while :; do
+    [ -f "$SCRIPT_DIR/warp.sh" ] || break   # plugin uninstalled -> self-remove
+    do_scan
+    sleep "${WARP_SCAN_INTERVAL:-3}"
+  done
+  rm -f "$STATE_DIR/scanner.pid" 2>/dev/null || true
+}
+
+do_ensure_scanner() {
+  _pidfile="$STATE_DIR/scanner.pid"
+  if [ -f "$_pidfile" ] && kill -0 "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null; then
+    echo "scanner=running pid=$(cat "$_pidfile")"
+    return 0
+  fi
+  nohup sh "$SCRIPT_DIR/warp.sh" scan-loop >/dev/null 2>&1 &
+  echo $! > "$_pidfile" 2>/dev/null || true
+  echo "scanner=started pid=$!"
+}
+
 # ------------------------------------------------------------ watcher ----
 # The watcher reports warp's scraped state into herdr's native agent model
 # (pane.report_agent), so a warp pane shows up in `herdr agent list` and
@@ -228,6 +285,20 @@ do_adopt() {
   echo "warp_pane=$_pane"
   echo "watcher=$(cat "$(_watcher_pidfile "$_pane")" 2>/dev/null || echo unknown)"
   echo "status=$(classify_pane "$_pane")"
+}
+
+# Lazily keep the scanner alive on any plugin use (the startup hook is the
+# primary starter).
+maybe_ensure_scanner() {
+  case "$cmd" in
+    watch|scan|scan-loop|ensure-scanner) return 0 ;;
+  esac
+  _pidfile="$STATE_DIR/scanner.pid"
+  if [ -f "$_pidfile" ] && kill -0 "$(cat "$_pidfile" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  nohup sh "$SCRIPT_DIR/warp.sh" scan-loop >/dev/null 2>&1 &
+  echo $! > "$_pidfile" 2>/dev/null || true
 }
 
 # Parse selected_text / focused_pane_cwd out of HERDR_PLUGIN_CONTEXT_JSON.
@@ -595,6 +666,8 @@ do_exit() {
 
 # ------------------------------------------------------------------ main --
 
+maybe_ensure_scanner
+
 case "$cmd" in
   open) do_open ;;
   send) do_send "$@" ;;
@@ -610,5 +683,8 @@ case "$cmd" in
   exit) do_exit ;;
   watch) do_watch "$@" ;;
   adopt) do_adopt ;;
+  scan) do_scan ;;
+  scan-loop) do_scan_loop ;;
+  ensure-scanner) do_ensure_scanner ;;
   *) die "unknown subcommand '$cmd' (open|send|ask|answer|status|wait|read|approve|deny|new|stop|exit|watch|adopt)" ;;
 esac
